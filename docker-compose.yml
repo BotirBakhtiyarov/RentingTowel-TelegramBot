@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: towel_rental_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - postgres
+    networks:
+      - towel_network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: towel_rental_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-towel_rental}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - towel_network
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
+
+networks:
+  towel_network:
+    driver: bridge
+

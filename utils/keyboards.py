@@ -9,7 +9,8 @@ def get_main_menu(telegram_id, is_admin=False):
         keyboard.add(
             KeyboardButton("👥 Sartaroshlar"),
             KeyboardButton("📦 Ombor"),
-            KeyboardButton("📊 Hisobotlar")
+            KeyboardButton("📊 Hisobotlar"),
+            KeyboardButton("💬 Xabar yuborish")
         )
     else:
         keyboard.add(
@@ -27,7 +28,19 @@ def get_admin_menu():
         KeyboardButton("👥 Sartaroshlar"),
         KeyboardButton("📦 Ombor"),
         KeyboardButton("📊 Hisobotlar"),
+        KeyboardButton("💬 Xabar yuborish"),
         KeyboardButton("🔙 Asosiy menu")
+    )
+    return keyboard
+
+
+def get_inventory_management_keyboard():
+    """Ombor boshqaruv keyboard"""
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("➕ Sochiq qo'shish", callback_data="inv_add"),
+        InlineKeyboardButton("➖ Eskirgan sochiqlarni olib tashlash", callback_data="inv_remove"),
+        InlineKeyboardButton("🔙 Orqaga", callback_data="inv_back")
     )
     return keyboard
 
