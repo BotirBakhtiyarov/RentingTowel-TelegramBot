@@ -11,6 +11,8 @@ user_action_data = {}
 admin_message_state = {}
 # Inventory management state
 inventory_action_state = {}
+# AI report question state
+ai_report_state = {}
 
 
 def setup_admin_handlers(bot):
@@ -407,19 +409,25 @@ def setup_admin_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith('report_'))
     def report_callback_handler(call: CallbackQuery):
         if call.data == 'report_ai':
-            # AI hisobot uchun
-            bot.answer_callback_query(call.id, "AI hisobot tayyorlanmoqda...")
-            
-            with DatabaseService() as db_service:
-                report_data = db_service.get_report('all')  # Barcha ma'lumotlarni olamiz
-            
-            ai_report = ai_service.generate_report(report_data)
-            
-            bot.send_message(
+            # AI hisobot uchun - avval admin savolini so'raymiz
+            bot.answer_callback_query(call.id)
+
+            ai_report_state[call.from_user.id] = {"awaiting_question": True}
+
+            msg = bot.send_message(
                 call.message.chat.id,
-                f"🤖 AI Hisobot\n\n{ai_report}",
-                reply_markup=get_report_periods()
+                (
+                    "🤖 AI Hisobot\n\n"
+                    "Savolingizni yozing. Masalan:\n"
+                    "- Kecha barber_a ga nechta sochiq berdim?\n"
+                    "- So'nggi 7 kunda eng ko'p sochiq olgan sartarosh kim?\n\n"
+                    "AI ma'lumotlarni bazadan oladi va O'zbekiston vaqti (UTC+5) bo'yicha "
+                    "hisoblab javob beradi."
+                )
             )
+
+            # Keyingi qadamda AI savolini qayta ishlaymiz
+            bot.register_next_step_handler(msg, process_ai_report_question)
             return
 
         period = call.data.replace('report_', '')
@@ -464,6 +472,58 @@ def setup_admin_handlers(bot):
                 call.message.message_id,
                 reply_markup=keyboard
             )
+
+    def process_ai_report_question(message: Message):
+        """Adminning AI hisobot savolini qayta ishlash"""
+        admin_id = message.from_user.id
+
+        # Faqat adminlar uchun
+        if admin_id not in ADMIN_IDS:
+            bot.send_message(message.chat.id, "❌ Siz bu funksiyadan foydalana olmaysiz.")
+            return
+
+        # State tekshirish
+        if admin_id not in ai_report_state or not ai_report_state[admin_id].get("awaiting_question"):
+            bot.send_message(message.chat.id, "⚠️ AI hisobot uchun avval '📊 Hisobotlar' → '🤖 AI Hisobot' ni bosing.")
+            return
+
+        question_text = message.text.strip()
+        if not question_text:
+            bot.send_message(message.chat.id, "❌ Iltimos, savolni matn ko'rinishida yuboring.")
+            return
+
+        bot.send_message(message.chat.id, "⏳ AI hisobot tayyorlanmoqda, iltimos kuting...")
+
+        # Bazadan kerakli ma'lumotlarni olamiz
+        with DatabaseService() as db_service:
+            try:
+                users = db_service.get_all_users()
+                # Cheklangan miqdordagi tranzaksiyalarni olamiz (masalan, oxirgi 1000 ta)
+                transactions = db_service.get_all_transactions_with_users(limit=1000)
+                inventory = db_service.get_inventory()
+
+                data_for_ai = {
+                    "users": users,
+                    "transactions": transactions,
+                    "inventory": inventory,
+                }
+            except Exception as e:
+                bot.send_message(message.chat.id, f"❌ Ma'lumotlarni bazadan olishda xatolik: {e}")
+                if admin_id in ai_report_state:
+                    del ai_report_state[admin_id]
+                return
+
+        # AI dan javob olish
+        ai_answer = ai_service.answer_question_with_data(question_text, data_for_ai)
+
+        bot.send_message(
+            message.chat.id,
+            f"🤖 AI Javobi\n\n{ai_answer}"
+        )
+
+        # State ni tozalash
+        if admin_id in ai_report_state:
+            del ai_report_state[admin_id]
 
     # Admin xabar yuborish funksiyasi
     @bot.message_handler(func=lambda message: message.text == "💬 Xabar yuborish" and message.from_user.id in ADMIN_IDS)

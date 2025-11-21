@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, and_
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from .models import User, Transaction, Inventory, TransactionType
 from .db import SessionLocal
 
@@ -58,6 +58,12 @@ class DatabaseService:
         if not user:
             return None
 
+        # Ensure inventory record exists
+        inventory = self.db.query(Inventory).first()
+        if not inventory:
+            inventory = Inventory(total_towels=0, remaining_towels=0)
+            self.db.add(inventory)
+
         # Create transaction
         transaction = Transaction(
             user_id=user_id,
@@ -69,15 +75,27 @@ class DatabaseService:
 
         # Update user towel count
         if transaction_type == 'given':
+            # Towel is given to the barber: increase user's towels,
+            # decrease remaining towels in warehouse
             user.towel_count += quantity
-        else:  # taken
+            inventory.remaining_towels -= quantity
+            if inventory.remaining_towels < 0:
+                inventory.remaining_towels = 0
+        else:  # taken (towel returned from barber)
             user.towel_count -= quantity
             if user.towel_count < 0:
                 user.towel_count = 0
 
+            # Returned towels go back to warehouse
+            inventory.remaining_towels += quantity
+            # remaining_towels should not exceed total_towels
+            if inventory.remaining_towels > inventory.total_towels:
+                inventory.remaining_towels = inventory.total_towels
+
         user.updated_at = datetime.utcnow()
         self.db.commit()
         self.db.refresh(user)
+        self.db.refresh(inventory)
 
         return {
             'transaction': self._transaction_to_dict(transaction),
@@ -90,6 +108,32 @@ class DatabaseService:
             Transaction.user_id == user_id
         ).order_by(desc(Transaction.created_at)).limit(limit).all()
         return [self._transaction_to_dict(t) for t in transactions]
+
+    def get_all_transactions_with_users(self, limit: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Get recent transactions joined with user data.
+
+        This is mainly intended for AI analytics, so we limit the number of
+        rows by default to avoid sending an excessively large payload.
+        """
+        query = (
+            self.db.query(Transaction, User)
+            .join(User, Transaction.user_id == User.id)
+            .order_by(desc(Transaction.created_at))
+        )
+        if limit:
+            query = query.limit(limit)
+
+        rows = query.all()
+        result: List[Dict[str, Any]] = []
+        for transaction, user in rows:
+            result.append(
+                {
+                    "transaction": self._transaction_to_dict(transaction),
+                    "user": self._user_to_dict(user),
+                }
+            )
+        return result
 
     # Inventory operations
     def get_inventory(self) -> Optional[Dict]:

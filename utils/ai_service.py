@@ -10,14 +10,11 @@ class DeepSeekAIService:
         self.api_key = DEEPSEEK_API_KEY
         self.api_url = DEEPSEEK_API_URL
 
-    def generate_report(self, report_data: dict) -> str:
-        """Generate AI report based on towel renting data"""
-        
+    def _call_deepseek(self, system_prompt: str, user_content: str) -> str:
+        """Internal helper to call DeepSeek chat completion API"""
         if not self.api_key or self.api_key == 'your_deepseek_api_key_here':
             return "DeepSeek API key is not configured. Please set DEEPSEEK_API_KEY in .env file."
 
-        prompt = self._create_prompt(report_data)
-        
         try:
             response = requests.post(
                 f"{self.api_url}/v1/chat/completions",
@@ -30,11 +27,11 @@ class DeepSeekAIService:
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are an AI assistant that analyzes towel rental business data and provides insights and reports in a clear, professional manner."
+                            "content": system_prompt
                         },
                         {
                             "role": "user",
-                            "content": prompt
+                            "content": user_content
                         }
                     ],
                     "temperature": 0.7,
@@ -51,6 +48,55 @@ class DeepSeekAIService:
 
         except Exception as e:
             return f"Error generating AI report: {str(e)}"
+
+    def generate_report(self, report_data: dict) -> str:
+        """Generate high-level AI report based on aggregated towel renting data"""
+        prompt = self._create_prompt(report_data)
+        system_prompt = (
+            "You are an AI assistant that analyzes towel rental business data and "
+            "provides insights and reports in a clear, professional manner."
+        )
+        return self._call_deepseek(system_prompt, prompt)
+
+    def answer_question_with_data(self, question: str, data: dict) -> str:
+        """
+        Answer an arbitrary analytics question using raw database data.
+
+        The data argument should already contain all relevant information
+        (users, transactions, inventory, etc.) serialized to basic Python
+        types so it can be converted to JSON.
+        """
+        # Serialize data to JSON string for the prompt
+        try:
+            data_json = json.dumps(data, ensure_ascii=False)
+        except TypeError:
+            # Fallback: if something is not JSON serializable
+            data_json = str(data)
+
+        user_content = (
+            "You are given real database data for a towel rental business.\n\n"
+            "IMPORTANT RULES:\n"
+            "- All timestamps are in ISO 8601 format and represent UTC time.\n"
+            "- The business is located in Uzbekistan and uses Asia/Tashkent time (UTC+5).\n"
+            "- When the user mentions dates or words like 'today', 'yesterday', "
+            "'this week', etc., interpret them using Uzbekistan time (UTC+5).\n"
+            "- Answer ONLY based on the provided data. If the data is insufficient, "
+            "clearly say that you cannot answer exactly and explain what is missing.\n"
+            "- When referencing users, match by their name field in the data.\n\n"
+            f"User question:\n{question}\n\n"
+            "Here is the database data in JSON format:\n"
+            f"{data_json}\n\n"
+            "Now, answer the user's question as clearly as possible, in the same "
+            "language as the question (Uzbek or English), and include short numeric "
+            "summaries (counts, totals, etc.) where appropriate."
+        )
+
+        system_prompt = (
+            "You are an analytics assistant for a towel rental business in Uzbekistan. "
+            "Use ONLY the provided JSON data to answer questions. Be precise with numbers."
+        )
+
+        return self._call_deepseek(system_prompt, user_content)
 
     def _create_prompt(self, report_data: dict) -> str:
         """Create prompt for AI based on report data"""
